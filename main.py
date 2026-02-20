@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import logging
 from contextlib import asynccontextmanager
 from typing import Any
 
@@ -12,6 +13,7 @@ from psycopg.errors import UndefinedTable
 from psycopg_pool import ConnectionPool
 
 load_dotenv()
+logger = logging.getLogger("geeta_api")
 
 DATABASE_URL = os.getenv("DATABASE_URL")
 API_KEY = os.getenv("API_KEY")
@@ -52,11 +54,13 @@ def fetch_all_dicts(sql: str, params: tuple[Any, ...] = ()) -> list[dict[str, An
                 cur.execute(sql, params)
                 return list(cur.fetchall())
     except UndefinedTable as exc:
+        logger.exception("Undefined table during query")
         raise HTTPException(
             status_code=503,
             detail="Database schema not ready yet. Wait for import/migration to finish.",
         ) from exc
     except PsycopgError as exc:
+        logger.exception("Postgres error during query: %s", exc)
         raise HTTPException(status_code=500, detail=f"Database query failed: {exc.__class__.__name__}") from exc
 
 
@@ -68,11 +72,13 @@ def fetch_one_dict(sql: str, params: tuple[Any, ...] = ()) -> dict[str, Any] | N
                 cur.execute(sql, params)
                 return cur.fetchone()
     except UndefinedTable as exc:
+        logger.exception("Undefined table during query")
         raise HTTPException(
             status_code=503,
             detail="Database schema not ready yet. Wait for import/migration to finish.",
         ) from exc
     except PsycopgError as exc:
+        logger.exception("Postgres error during query: %s", exc)
         raise HTTPException(status_code=500, detail=f"Database query failed: {exc.__class__.__name__}") from exc
 
 

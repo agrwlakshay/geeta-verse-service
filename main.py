@@ -86,6 +86,40 @@ def fetch_one_dict(sql: str, params: tuple[Any, ...] = ()) -> dict[str, Any] | N
 from psycopg.rows import dict_row  # noqa: E402
 
 
+def get_verse_row(chapter_id: int, verse_number: int) -> dict[str, Any]:
+    verse_row = fetch_one_dict(
+        """
+        SELECT id, chapter_id, verse_number, speaker, slok, transliteration
+        FROM verses
+        WHERE chapter_id = %s AND verse_number = %s
+        """,
+        (chapter_id, verse_number),
+    )
+    if not verse_row:
+        raise HTTPException(status_code=404, detail="Verse not found")
+    return verse_row
+
+
+def get_commentary_rows(verse_id: str) -> list[dict[str, Any]]:
+    return fetch_all_dicts(
+        """
+        SELECT source_key, author, et, ht, ec, hc, sc
+        FROM commentaries
+        WHERE verse_id = %s
+        ORDER BY source_key
+        """,
+        (verse_id,),
+    )
+
+
+def first_commentary_text(row: dict[str, Any]) -> str | None:
+    for key in ("et", "ht", "ec", "hc", "sc"):
+        value = row.get(key)
+        if value:
+            return str(value)
+    return None
+
+
 @app.get("/health")
 def health() -> dict[str, str]:
     return {"status": "ok"}
@@ -120,28 +154,63 @@ def chapter(chapter_id: int) -> dict[str, Any]:
 
 @app.get("/verse/{chapter_id}/{verse_number}", dependencies=[Depends(auth)])
 def verse(chapter_id: int, verse_number: int) -> dict[str, Any]:
-    verse_row = fetch_one_dict(
-        """
-        SELECT id, chapter_id, verse_number, speaker, slok, transliteration
-        FROM verses
-        WHERE chapter_id = %s AND verse_number = %s
-        """,
-        (chapter_id, verse_number),
-    )
-    if not verse_row:
-        raise HTTPException(status_code=404, detail="Verse not found")
-
-    commentary_rows = fetch_all_dicts(
-        """
-        SELECT source_key, author, et, ht, ec, hc, sc
-        FROM commentaries
-        WHERE verse_id = %s
-        ORDER BY source_key
-        """,
-        (verse_row["id"],),
-    )
+    verse_row = get_verse_row(chapter_id, verse_number)
+    commentary_rows = get_commentary_rows(verse_row["id"])
     verse_row["commentaries"] = commentary_rows
     return verse_row
+
+
+@app.get("/verse/{chapter_id}/{verse_number}/sources", dependencies=[Depends(auth)])
+def verse_sources(chapter_id: int, verse_number: int) -> dict[str, Any]:
+    verse_row = get_verse_row(chapter_id, verse_number)
+    commentary_rows = get_commentary_rows(verse_row["id"])
+    sources = []
+    for row in commentary_rows:
+        sources.append(
+            {
+                "source_key": row["source_key"],
+                "author": row.get("author"),
+                "available_fields": [k for k in ("et", "ht", "ec", "hc", "sc") if row.get(k)],
+            }
+        )
+    return {
+        "verse_id": verse_row["id"],
+        "chapter_id": verse_row["chapter_id"],
+        "verse_number": verse_row["verse_number"],
+        "default_source": sources[0]["source_key"] if sources else None,
+        "sources": sources,
+    }
+
+
+@app.get("/verse/{chapter_id}/{verse_number}/clean", dependencies=[Depends(auth)])
+def verse_clean(
+    chapter_id: int,
+    verse_number: int,
+    source: str | None = Query(None, description="Preferred commentary source key, e.g. prabhu"),
+) -> dict[str, Any]:
+    verse_row = get_verse_row(chapter_id, verse_number)
+    commentary_rows = get_commentary_rows(verse_row["id"])
+
+    chosen = None
+    if source:
+        chosen = next((row for row in commentary_rows if row["source_key"] == source), None)
+    if chosen is None and commentary_rows:
+        chosen = commentary_rows[0]
+
+    commentary_text = first_commentary_text(chosen) if chosen else None
+    return {
+        "verse_id": verse_row["id"],
+        "chapter_id": verse_row["chapter_id"],
+        "verse_number": verse_row["verse_number"],
+        "speaker": verse_row.get("speaker"),
+        "slok": verse_row.get("slok"),
+        "transliteration": verse_row.get("transliteration"),
+        "commentary": {
+            "source_key": chosen.get("source_key") if chosen else None,
+            "author": chosen.get("author") if chosen else None,
+            "text": commentary_text,
+        },
+    }
 
 
 @app.get("/search", dependencies=[Depends(auth)])

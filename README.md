@@ -29,6 +29,8 @@ All data endpoints require:
 - `GET /chapters`
 - `GET /chapter/{chapter_id}`
 - `GET /verse/{chapter_id}/{verse_number}`
+- `GET /verse/{chapter_id}/{verse_number}/sources`
+- `GET /verse/{chapter_id}/{verse_number}/clean?source=prabhu`
 - `GET /search?q=<text>&limit=<n>`
 
 ## Example Requests
@@ -62,7 +64,19 @@ curl -H "x-api-key: YOUR_API_KEY" \
   "http://127.0.0.1:8000/search?q=karma&limit=5"
 ```
 
-### 6) Production request example
+### 6) List available commentary sources for a verse (AI-friendly)
+```bash
+curl -H "x-api-key: YOUR_API_KEY" \
+  http://127.0.0.1:8000/verse/2/47/sources
+```
+
+### 7) Get clean verse response with one commentary source
+```bash
+curl -H "x-api-key: YOUR_API_KEY" \
+  "http://127.0.0.1:8000/verse/2/47/clean?source=prabhu"
+```
+
+### 8) Production request example
 ```bash
 curl -H "x-api-key: YOUR_API_KEY" \
   https://geeta-verse-service-production.up.railway.app/chapters

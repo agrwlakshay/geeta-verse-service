@@ -12,7 +12,7 @@ from pydantic import BaseModel, Field
 from psycopg import Error as PsycopgError
 from psycopg.errors import UndefinedTable
 from psycopg_pool import ConnectionPool
-
+#random comment
 load_dotenv()
 logger = logging.getLogger("geeta_api")
 

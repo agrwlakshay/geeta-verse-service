@@ -8,6 +8,7 @@ from typing import Any
 from dotenv import load_dotenv
 from fastapi import Depends, FastAPI, HTTPException, Query, Security
 from fastapi.security import APIKeyHeader
+from pydantic import BaseModel, Field
 from psycopg import Error as PsycopgError
 from psycopg.errors import UndefinedTable
 from psycopg_pool import ConnectionPool
@@ -32,11 +33,27 @@ def auth(api_key: str | None = Security(api_key_header)) -> None:
         raise HTTPException(status_code=401, detail="Unauthorized")
 
 
+def ensure_user_preferences_table() -> None:
+    assert pool is not None
+    sql = """
+    CREATE TABLE IF NOT EXISTS user_preferences (
+        chat_id BIGINT PRIMARY KEY,
+        source TEXT NOT NULL,
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    """
+    with pool.connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(sql)
+        conn.commit()
+
+
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     global pool
     pool = ConnectionPool(conninfo=DATABASE_URL, min_size=1, max_size=10)
     try:
+        ensure_user_preferences_table()
         yield
     finally:
         if pool is not None:
@@ -44,6 +61,10 @@ async def lifespan(_: FastAPI):
 
 
 app = FastAPI(title="Geeta API", version="1.0.0", lifespan=lifespan)
+
+
+class PreferenceUpdate(BaseModel):
+    source: str = Field(min_length=1, max_length=64)
 
 
 def fetch_all_dicts(sql: str, params: tuple[Any, ...] = ()) -> list[dict[str, Any]]:
@@ -182,6 +203,45 @@ def first_commentary_text(row: dict[str, Any]) -> str | None:
     return None
 
 
+def get_user_preference(chat_id: int) -> dict[str, Any] | None:
+    return fetch_one_dict(
+        """
+        SELECT chat_id, source, updated_at
+        FROM user_preferences
+        WHERE chat_id = %s
+        """,
+        (chat_id,),
+    )
+
+
+def upsert_user_preference(chat_id: int, source: str) -> dict[str, Any]:
+    source = source.strip().lower()
+    if not source:
+        raise HTTPException(status_code=400, detail="Invalid source")
+
+    assert pool is not None
+    try:
+        with pool.connection() as conn:
+            with conn.cursor(row_factory=dict_row) as cur:
+                cur.execute(
+                    """
+                    INSERT INTO user_preferences (chat_id, source, updated_at)
+                    VALUES (%s, %s, NOW())
+                    ON CONFLICT (chat_id) DO UPDATE SET
+                        source = EXCLUDED.source,
+                        updated_at = NOW()
+                    RETURNING chat_id, source, updated_at
+                    """,
+                    (chat_id, source),
+                )
+                row = cur.fetchone()
+            conn.commit()
+        return row
+    except PsycopgError as exc:
+        logger.exception("Postgres error during preference upsert: %s", exc)
+        raise HTTPException(status_code=500, detail=f"Database query failed: {exc.__class__.__name__}") from exc
+
+
 @app.get("/health")
 def health() -> dict[str, str]:
     return {"status": "ok"}
@@ -196,6 +256,19 @@ def chapters() -> list[dict[str, Any]]:
         ORDER BY id
         """
     )
+
+
+@app.get("/users/{chat_id}/preference", dependencies=[Depends(auth)])
+def user_preference(chat_id: int) -> dict[str, Any]:
+    pref = get_user_preference(chat_id)
+    if not pref:
+        return {"chat_id": chat_id, "source": None}
+    return pref
+
+
+@app.put("/users/{chat_id}/preference", dependencies=[Depends(auth)])
+def set_user_preference(chat_id: int, payload: PreferenceUpdate) -> dict[str, Any]:
+    return upsert_user_preference(chat_id, payload.source)
 
 
 @app.get("/chapter/{chapter_id}", dependencies=[Depends(auth)])

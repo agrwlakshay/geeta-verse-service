@@ -31,6 +31,8 @@ All data endpoints require:
 - `GET /verse/{chapter_id}/{verse_number}`
 - `GET /verse/{chapter_id}/{verse_number}/sources`
 - `GET /verse/{chapter_id}/{verse_number}/clean?source=prabhu`
+- `GET /users/{chat_id}/preference`
+- `PUT /users/{chat_id}/preference`
 - `GET /search?q=<text>&limit=<n>`
 
 ## Example Requests
@@ -80,6 +82,21 @@ curl -H "x-api-key: YOUR_API_KEY" \
 ```bash
 curl -H "x-api-key: YOUR_API_KEY" \
   https://geeta-verse-service-production.up.railway.app/chapters
+```
+
+### 9) Get user preference
+```bash
+curl -H "x-api-key: YOUR_API_KEY" \
+  http://127.0.0.1:8000/users/7609618379/preference
+```
+
+### 10) Set user preference
+```bash
+curl -X PUT \
+  -H "x-api-key: YOUR_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"source":"chinmay"}' \
+  http://127.0.0.1:8000/users/7609618379/preference
 ```
 
 ## Local Run
